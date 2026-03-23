@@ -70,8 +70,8 @@ chmod +x init.sh && ./init.sh
 ```bash
 source .venv/bin/activate
 
-# Process a single file
-python orchestrator.py input/text/document.md
+# Process a single file (filename MUST start with YYYYMMDD_)
+python orchestrator.py input/text/20260321_document.md
 
 # Process all new files in input/
 python orchestrator.py --scan
@@ -134,6 +134,7 @@ The orchestrator tracks processed files in `processing/processed.log` (TSV: time
 - **Real-time progress**: The orchestrator streams agent tool calls to stdout with timestamps (`[12s] Using: Read`), so you always know what's happening.
 - **Image interpretation**: The summarizer reads extracted images (PNG files) via Claude's multimodal capabilities and describes diagrams as structured text. Images stay in `processing/` — only text reaches the final output.
 - **Text-only output**: 100% portable markdown. No images, no binary files. Output is consumed as LLM context in other projects.
+- **YYYYMMDD_ filename prefix required**: All input files must start with `YYYYMMDD_` (e.g., `20260321_my-document.md`). This date is carried through the entire pipeline — normalized, summarized, and output filenames all use it.
 - **Processing deduplication**: Files tracked by path + SHA-256 hash.
 - **Google Drive markdown preferred**: For Google Docs, export as .md and drop in `input/text/`. Cleaner than .docx.
 
@@ -154,6 +155,10 @@ The orchestrator tracks processed files in `processing/processed.log` (TSV: time
 ## Architecture Reference
 
 Full architecture doc: `orchestrator-architecture.md`
+
+## Code Rules
+
+- **No project-specific references in committable code**: Never put feature names, people names, company names, or project-specific terminology in code, scripts, or error messages. Context Forge is generic — project-specific content belongs only in `features/*.yaml` (not committed). Use generic examples like `20260321_my-document.md`, not real project names.
 
 ## Security Rules
 

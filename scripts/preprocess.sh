@@ -11,9 +11,11 @@
 #   PDF/ODT/RTF → extract text via pandoc → markdown
 #   Plain text  → copy as-is → markdown
 #
+# Input filenames MUST start with YYYYMMDD_ prefix (e.g., 20260321_Silver PRD.md)
+#
 # Output:
-#   {output-dir}/YYYY-MM-DD-{basename}.md
-#   {output-dir}/YYYY-MM-DD-{basename}-images/  (if images found)
+#   {output-dir}/YYYY-MM-DD-{name}.md        (date from filename prefix)
+#   {output-dir}/YYYY-MM-DD-{name}-images/   (if images found)
 #
 # Dependencies: pandoc (brew install pandoc), curl (for Whisper)
 
@@ -41,9 +43,22 @@ FILENAME=$(basename "$INPUT_FILE")
 BASENAME="${FILENAME%.*}"
 EXTENSION="${FILENAME##*.}"
 EXTENSION_LOWER=$(echo "$EXTENSION" | tr '[:upper:]' '[:lower:]')
-DATE=$(date +%Y-%m-%d)
-OUTPUT_FILE="${OUTPUT_DIR}/${DATE}-${BASENAME}.md"
-IMAGES_DIR="${OUTPUT_DIR}/${DATE}-${BASENAME}-images"
+
+# ─── Validate YYYYMMDD_ prefix ─────────────────────────────────────
+if [[ "$BASENAME" =~ ^([0-9]{8})_(.*) ]]; then
+    DATE_RAW="${BASH_REMATCH[1]}"
+    NAME_PART="${BASH_REMATCH[2]}"
+    # Convert YYYYMMDD to YYYY-MM-DD
+    DATE="${DATE_RAW:0:4}-${DATE_RAW:4:2}-${DATE_RAW:6:2}"
+else
+    echo "Error: Input filename must start with YYYYMMDD_ prefix"
+    echo "  Got: $FILENAME"
+    echo "  Expected: YYYYMMDD_description.ext (e.g., 20260321_my-document.md)"
+    exit 1
+fi
+
+OUTPUT_FILE="${OUTPUT_DIR}/${DATE}-${NAME_PART}.md"
+IMAGES_DIR="${OUTPUT_DIR}/${DATE}-${NAME_PART}-images"
 
 mkdir -p "$OUTPUT_DIR"
 

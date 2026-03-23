@@ -439,10 +439,15 @@ def structure_output(summarized_file, feature, output_category):
             title = line.lstrip("# ").split(" — ")[0].strip()
             break
 
+    # Extract date from summarized filename (YYYY-MM-DD-name.md)
+    import re
+    stem = Path(summarized_file).stem
+    date_match = re.match(r"(\d{4}-\d{2}-\d{2})-", stem)
+    file_date = date_match.group(1) if date_match else datetime.now().strftime("%Y-%m-%d")
+
     # Build output filename: YYYY-MM-DD-slugified-title.md
-    today = datetime.now().strftime("%Y-%m-%d")
     slug = slugify(title)
-    output_filename = f"{today}-{slug}.md"
+    output_filename = f"{file_date}-{slug}.md"
     output_file = output_dir / output_filename
 
     # Copy content to output
@@ -571,9 +576,17 @@ def run_pipeline(input_file, config, feature, force=False, from_step=None):
             "summarize" — skip pre-process + classify, input must be in processing/normalized/
             "structure" — skip everything except structurer, input must be in processing/summarized/
     """
+    import re
     input_path = Path(input_file)
     if not input_path.exists():
         print(f"Error: File not found: {input_file}")
+        return False
+
+    # Validate YYYYMMDD_ prefix on input files (not for --from-step which uses processing/ files)
+    if not from_step and not re.match(r"^\d{8}_", input_path.name):
+        print(f"Error: Input filename must start with YYYYMMDD_ prefix")
+        print(f"  Got: {input_path.name}")
+        print(f"  Expected: YYYYMMDD_description.ext (e.g., 20260321_my-document.md)")
         return False
 
     resolved_path = str(input_path.resolve())
