@@ -121,9 +121,11 @@ def preprocess(input_file):
 
     print(result.stdout.strip())
 
-    # Find the output file
+    # Find the output file — strip YYYYMMDD_ prefix since preprocess.sh converts it to YYYY-MM-DD-
+    import re
     basename = Path(input_file).stem
-    output_file = find_output_file(NORMALIZED_DIR, basename)
+    name_part = re.sub(r"^\d{8}_", "", basename)
+    output_file = find_output_file(NORMALIZED_DIR, name_part)
     if output_file:
         print(f"  → Normalized: {output_file}")
     return output_file
@@ -598,9 +600,10 @@ def run_pipeline(input_file, config, feature, force=False, from_step=None):
         return True
 
     basename = input_path.stem
-    # Strip date prefix (YYYY-MM-DD-) from basename if present for output file matching
+    # Strip date prefix from basename for output file matching
+    # Handles both YYYYMMDD_ (input files) and YYYY-MM-DD- (processing files)
     import re
-    clean_basename = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", basename)
+    clean_basename = re.sub(r"^(\d{8}_|\d{4}-\d{2}-\d{2}-)", "", basename)
 
     print(f"\nPipeline: {steps_label}")
     print(f"Input: {input_file}")
