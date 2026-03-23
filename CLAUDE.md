@@ -81,7 +81,21 @@ python orchestrator.py --scan
 
 # Reprocess everything (ignore processed.log)
 python orchestrator.py --scan --force
+
+# Resume from a specific step (skip pre-processing)
+python orchestrator.py --from-step classify processing/normalized/file.md
+python orchestrator.py --from-step summarize processing/normalized/file.md
+python orchestrator.py --from-step structure processing/summarized/file.md
 ```
+
+### `--from-step` flag
+
+Allows resuming the pipeline from any step. Useful when:
+- Pre-processing already ran (e.g., Whisper transcription took 5 min, don't repeat it)
+- An agent failed mid-pipeline and you want to retry from that step
+- You want to re-summarize with a different feature profile without re-preprocessing
+
+Valid steps: `classify`, `summarize`, `structure`. Input file must be from the corresponding `processing/` directory.
 
 ## Processing Tracker
 
@@ -119,7 +133,9 @@ The orchestrator tracks processed files in `processing/processed.log` (TSV: time
 
 - **Unified pipeline**: ALL inputs go through the same 4 steps. No branching pipelines.
 - **Pre-processor is a script, not an agent**: Format conversion is mechanical — no LLM needed.
-- **Category-driven extraction depth**: The classifier determines how deep the summarizer goes. Technical content preserved near-verbatim; business content heavily compressed.
+- **Category-driven extraction depth**: The classifier determines how deep the summarizer goes (supports primary + secondary categories). Technical content preserved near-verbatim; business content heavily compressed.
+- **Content injection**: The summarizer receives the full source content directly in its task prompt (between `--- FULL CONTENT ---` markers), avoiding extra Read turns. Images are still read via the Read tool.
+- **Real-time progress**: The orchestrator streams agent tool calls to stdout with timestamps (`[12s] Using: Read`), so you always know what's happening.
 - **Image interpretation**: The summarizer reads extracted images (PNG files) via Claude's multimodal capabilities and describes diagrams as structured text. Images stay in `processing/` — only text reaches the final output.
 - **Text-only output**: 100% portable markdown. No images, no binary files. Output is consumed as LLM context in other projects.
 - **Processing deduplication**: Files tracked by path + SHA-256 hash.

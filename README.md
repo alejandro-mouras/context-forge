@@ -78,6 +78,11 @@ source .venv/bin/activate
 python orchestrator.py input/text/file.md          # process a single file
 python orchestrator.py --scan                       # process all new files in input/
 python orchestrator.py --scan --force               # reprocess everything
+
+# Resume from a specific pipeline step (skip pre-processing)
+python orchestrator.py --from-step classify processing/normalized/file.md
+python orchestrator.py --from-step summarize processing/normalized/file.md
+python orchestrator.py --from-step structure processing/summarized/file.md
 ```
 
 ## Processing Tracker
