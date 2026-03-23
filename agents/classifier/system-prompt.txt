@@ -36,6 +36,15 @@ Planning and coordination content. Sprint planning, project timelines, resource 
 - Do NOT read images — only classify based on the markdown text
 - Do NOT use any tools — the content is already in your prompt, just output JSON
 
+## Output Categories
+
+In addition to the content category (which controls summarizer depth), you must also pick an **output_category** that determines where the final file is stored. These are the valid output categories:
+
+- `meetings` — call transcripts, meeting notes, standups, syncs, planning sessions
+- `voice-notes` — personal voice memos, quick recordings, brainstorming
+- `documents` — PRDs, specs, design docs, architecture docs, reports
+- `research` — competitive analysis, market research, technical investigations
+
 ## Output
 
 Respond with ONLY a JSON object, nothing else:
@@ -44,6 +53,7 @@ Respond with ONLY a JSON object, nothing else:
 {
   "content_category": "product",
   "secondary_category": "technical",
+  "output_category": "documents",
   "confidence": "high",
   "reasoning": "PRD with user stories and acceptance criteria, but also contains detailed API endpoint definitions, data schemas, state machine descriptions, and infrastructure specs"
 }

@@ -206,15 +206,6 @@ def build_task_prompt(agent_name, input_file, feature, classification=None):
             f"--- FULL CONTENT ---\n{content}\n--- END CONTENT ---"
         )
 
-    if agent_name == "context-structurer":
-        feature_name = feature["name"]
-        return (
-            f"Structure this file into final output: {input_file}\n\n"
-            f"Feature profile:\n```yaml\n{feature_context}```\n\n"
-            f"Read the file, categorize it, write it to output/{feature_name}/<category>/, "
-            f"and update the category _index.md and _master-index.md."
-        )
-
     return f"Process: {input_file}"
 
 
@@ -223,7 +214,7 @@ def build_task_prompt(agent_name, input_file, feature, classification=None):
 AGENT_TIMEOUTS = {
     "classifier": 120,       # haiku, 1 turn — should be very fast
     "summarizer": 1800,      # opus, large docs with images — up to 30 min
-    "context-structurer": 300,  # sonnet, indexing — 5 min
+    # context-structurer is now pure Python, no timeout needed
 }
 
 
@@ -326,7 +317,9 @@ def run_agent(agent_name, task, config):
 # ─── Classifier ──────────────────────────────────────────────────────
 
 VALID_CATEGORIES = {"technical", "product", "business", "planning"}
+VALID_OUTPUT_CATEGORIES = {"meetings", "voice-notes", "documents", "research"}
 DEFAULT_CATEGORY = "technical"
+DEFAULT_OUTPUT_CATEGORY = "documents"
 
 
 def classify(normalized_file, config, feature):
@@ -337,7 +330,7 @@ def classify(normalized_file, config, feature):
     task = build_task_prompt("classifier", normalized_file, feature)
     result = run_agent("classifier", task, config)
 
-    default_result = {"primary": DEFAULT_CATEGORY, "secondary": None}
+    default_result = {"primary": DEFAULT_CATEGORY, "secondary": None, "output_category": DEFAULT_OUTPUT_CATEGORY}
 
     if result is None:
         print(f"[classifier] Failed — defaulting to '{DEFAULT_CATEGORY}'")
@@ -366,14 +359,19 @@ def classify(normalized_file, config, feature):
             print(f"[classifier] Unknown secondary '{secondary}' — ignoring")
             secondary = None
 
+        output_category = data.get("output_category", DEFAULT_OUTPUT_CATEGORY)
+        if output_category not in VALID_OUTPUT_CATEGORIES:
+            print(f"[classifier] Unknown output_category '{output_category}' — defaulting to '{DEFAULT_OUTPUT_CATEGORY}'")
+            output_category = DEFAULT_OUTPUT_CATEGORY
+
         if secondary:
-            print(f"[classifier] Category: {primary} + {secondary} (confidence: {confidence})")
+            print(f"[classifier] Category: {primary} + {secondary} → {output_category} (confidence: {confidence})")
         else:
-            print(f"[classifier] Category: {primary} (confidence: {confidence})")
+            print(f"[classifier] Category: {primary} → {output_category} (confidence: {confidence})")
         if reasoning:
             print(f"  Reasoning: {reasoning[:200]}")
 
-        return {"primary": primary, "secondary": secondary}
+        return {"primary": primary, "secondary": secondary, "output_category": output_category}
 
     except (json.JSONDecodeError, AttributeError):
         print(f"[classifier] Could not parse output — defaulting to '{DEFAULT_CATEGORY}'")
@@ -397,6 +395,166 @@ def find_output_file(directory, basename):
         reverse=True,
     )
     return str(matches[0]) if matches else None
+
+
+# ─── Context Structurer (pure Python, no LLM) ───────────────────────
+
+def slugify(text):
+    """Convert text to a URL-friendly slug."""
+    import re
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[-\s]+", "-", text)
+    return text.strip("-")
+
+
+def extract_tags_from_content(content, feature):
+    """Extract feature profile tags found in the summarized content."""
+    tags = []
+    feature_tags = feature.get("tags", {})
+    for tag in feature_tags:
+        # Look for the tag in headers, table cells, or [TAG] references
+        if f"[{tag}]" in content or f"`{tag}`" in content or f"| {tag} |" in content:
+            tags.append(tag)
+    return tags
+
+
+def structure_output(summarized_file, feature, output_category):
+    """Copy summarized file to output directory and update indexes. No LLM needed."""
+    print(f"\n{'='*60}")
+    print(f"  Context Structurer (script)")
+    print(f"{'='*60}\n")
+
+    feature_name = feature["name"]
+    output_dir = ROOT / "output" / feature_name / output_category
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Read summarized content
+    content = Path(summarized_file).read_text(encoding="utf-8")
+
+    # Extract title from first H1 heading
+    title = Path(summarized_file).stem
+    for line in content.split("\n"):
+        if line.startswith("# "):
+            title = line.lstrip("# ").split(" — ")[0].strip()
+            break
+
+    # Build output filename: YYYY-MM-DD-slugified-title.md
+    today = datetime.now().strftime("%Y-%m-%d")
+    slug = slugify(title)
+    output_filename = f"{today}-{slug}.md"
+    output_file = output_dir / output_filename
+
+    # Copy content to output
+    output_file.write_text(content, encoding="utf-8")
+    print(f"  → Output: {output_file}")
+
+    # Extract tags from content
+    tags = extract_tags_from_content(content, feature)
+    tags_str = ", ".join(f"[{t}]" for t in tags) if tags else "—"
+
+    # Timestamp for index entries
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # Update category index
+    _update_category_index(output_dir, now, title, tags_str, output_filename)
+
+    # Update master index
+    _update_master_index(ROOT / "output" / feature_name, feature_name, now, title,
+                         tags, output_category, output_filename)
+
+    print(f"  → Tags: {tags_str}")
+    print(f"  → Indexes updated")
+    return str(output_file)
+
+
+def _update_category_index(category_dir, timestamp, title, tags_str, filename):
+    """Update or create the category _index.md."""
+    index_file = category_dir / "_index.md"
+    category_name = category_dir.name.replace("-", " ").title()
+
+    if index_file.exists():
+        lines = index_file.read_text(encoding="utf-8").split("\n")
+        # Remove existing entry for same filename if present
+        lines = [l for l in lines if filename not in l]
+        # Find the table (after header row + separator)
+        insert_idx = None
+        for i, line in enumerate(lines):
+            if line.startswith("|---") or line.startswith("| ---"):
+                insert_idx = i + 1
+                break
+        if insert_idx is not None:
+            entry = f"| {timestamp} | {title} | {tags_str} | document |"
+            lines.insert(insert_idx, entry)
+        content = "\n".join(lines)
+    else:
+        content = (
+            f"# {category_name}\n\n"
+            f"| Processed | Title | Tags | Source |\n"
+            f"|-----------|-------|------|--------|\n"
+            f"| {timestamp} | {title} | {tags_str} | document |\n"
+        )
+
+    index_file.write_text(content, encoding="utf-8")
+
+
+def _update_master_index(feature_dir, feature_name, timestamp, title, tags,
+                         output_category, filename):
+    """Update or create the master _master-index.md."""
+    index_file = feature_dir / "_master-index.md"
+    relative_path = f"{output_category}/{filename}"
+    tags_str = ", ".join(f"[{t}]" for t in tags) if tags else "—"
+    entry_line = f"- [{timestamp} {title}]({relative_path}) — {tags_str}"
+
+    if index_file.exists():
+        content = index_file.read_text(encoding="utf-8")
+        # Remove existing entry for same file if present
+        lines = [l for l in content.split("\n") if filename not in l]
+        content = "\n".join(lines)
+
+        # Add to Recent section (after "## Recent" line)
+        recent_lines = content.split("\n")
+        insert_idx = None
+        for i, line in enumerate(recent_lines):
+            if line.strip() == "## Recent":
+                insert_idx = i + 1
+                break
+
+        if insert_idx is not None:
+            recent_lines.insert(insert_idx, entry_line)
+        else:
+            # No Recent section — add one after the title
+            for i, line in enumerate(recent_lines):
+                if line.startswith("# "):
+                    recent_lines.insert(i + 1, f"\n## Recent\n{entry_line}")
+                    break
+
+        content = "\n".join(recent_lines)
+
+        # Add to "By component" sections
+        for tag in tags:
+            section_header = f"### {tag}"
+            if section_header in content:
+                # Add under existing section if not already there
+                tag_entry = f"- [{timestamp} {title}]({relative_path})"
+                if tag_entry not in content:
+                    idx = content.index(section_header) + len(section_header)
+                    content = content[:idx] + f"\n{tag_entry}" + content[idx:]
+            else:
+                # Create new section before the end
+                tag_entry = f"\n{section_header}\n- [{timestamp} {title}]({relative_path})\n"
+                content = content.rstrip() + "\n" + tag_entry
+
+        index_file.write_text(content, encoding="utf-8")
+    else:
+        # Create fresh master index
+        lines = [f"# {feature_name.title()} — Master Index\n", "## Recent", entry_line, "",
+                 "## By component"]
+        for tag in tags:
+            lines.append(f"\n### {tag}")
+            lines.append(f"- [{timestamp} {title}]({relative_path})")
+        lines.append("")
+        index_file.write_text("\n".join(lines), encoding="utf-8")
 
 
 # ─── Pipeline ────────────────────────────────────────────────────────
@@ -450,10 +608,10 @@ def run_pipeline(input_file, config, feature, force=False, from_step=None):
         label = classification["primary"]
         if classification.get("secondary"):
             label += f" + {classification['secondary']}"
-        print(f"  → Category: {label}")
+        print(f"  → Category: {label} → {classification['output_category']}")
     else:
-        classification = {"primary": DEFAULT_CATEGORY, "secondary": None}
-        print(f"  → Category: {DEFAULT_CATEGORY} (default, classifier skipped)")
+        classification = {"primary": DEFAULT_CATEGORY, "secondary": None, "output_category": DEFAULT_OUTPUT_CATEGORY}
+        print(f"  → Category: {DEFAULT_CATEGORY} → {DEFAULT_OUTPUT_CATEGORY} (default, classifier skipped)")
 
     # Step 3: Summarizer agent (opus — depth guided by category)
     if start <= 2:
@@ -472,10 +630,10 @@ def run_pipeline(input_file, config, feature, force=False, from_step=None):
     else:
         summarized_file = str(input_path)
 
-    # Step 4: Context Structurer agent (sonnet — categorize and index)
-    task = build_task_prompt("context-structurer", summarized_file, feature)
-    result = run_agent("context-structurer", task, config)
-    if result is None:
+    # Step 4: Context Structurer (script — copy to output + update indexes)
+    output_category = classification.get("output_category", DEFAULT_OUTPUT_CATEGORY)
+    output_file = structure_output(summarized_file, feature, output_category)
+    if not output_file:
         print("\nPipeline failed at: context-structurer")
         return False
 
