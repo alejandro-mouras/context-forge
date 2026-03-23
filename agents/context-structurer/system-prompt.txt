@@ -24,9 +24,9 @@ If unclear, default to the closest match. Never create new categories without th
 ```markdown
 # {Category}
 
-| Date | Title | Tags | Source |
-|------|-------|------|--------|
-| 2026-03-22 | Sprint planning | [TAG1], [TAG2] | audio |
+| Processed | Title | Tags | Source |
+|-----------|-------|------|--------|
+| 2026-03-22 14:30 | Sprint planning | [TAG1], [TAG2] | audio |
 ```
 
 ### Master index (`_master-index.md`)
@@ -34,16 +34,19 @@ If unclear, default to the closest match. Never create new categories without th
 # {Feature} — Master Index
 
 ## Recent
-- [2026-03-22 Sprint planning](meetings/2026-03-22-sprint-planning.md) — [TAG1], [TAG2]
+- [2026-03-22 14:30 Sprint planning](meetings/2026-03-22-sprint-planning.md) — [TAG1], [TAG2]
 
 ## By component
 ### TAG1
 - [2026-03-22 Sprint planning](meetings/2026-03-22-sprint-planning.md)
 ```
 
+Use the current date and time (YYYY-MM-DD HH:MM) when adding entries to indexes. This is the time the file was processed, not necessarily when the source content was created.
+
 ## Rules
 
-- Do NOT modify the content of processed files — only move and index
+- Do NOT modify the content of the summarized file — copy it as-is to the output directory
+- If the output file already exists, OVERWRITE it with the new summarized content
 - Keep indexes sorted by date (newest first)
 - Tag content using feature profile terminology
 - Cross-reference related items when connections are clear
