@@ -5,11 +5,11 @@
 Context Forge uses a unified 4-step pipeline for ALL inputs:
 
 1. **Pre-processor** (shell script, no LLM) — normalizes any format into clean markdown + extracted images
-2. **Classifier** (Claude Code agent, haiku) — quick content categorization to determine extraction depth
+2. **Classifier** (Claude Code agent, haiku) — quick content categorization to determine extraction depth + output category
 3. **Summarizer** (Claude Code agent, opus) — structured extraction + image interpretation, depth guided by category
-4. **Context Structurer** (Claude Code agent, sonnet) — categorizes and indexes into final output
+4. **Structurer** (Python in orchestrator, no LLM) — copies to output directory, updates indexes
 
-Uses the Claude Code subscription via CLI (`claude -p`). No API keys or per-token billing.
+Only steps 2 and 3 use LLMs. Uses the Claude Code subscription via CLI (`claude -p`). No API keys or per-token billing.
 
 ---
 
@@ -54,11 +54,12 @@ Any input
 │  │ processing/summarized/                 │              │
 │  └────────────────────────────┬───────────┘              │
 │                               │                          │
-│  Step 4: Context Structurer   ▼  (sonnet)                │
+│  Step 4: Structurer (Python)  ▼                          │
 │  ┌────────────────────────────────────────┐              │
-│  │ Categorizes by feature profile. Writes │              │
-│  │ to output/{feature}/{category}/. Up-   │              │
-│  │ dates _index.md and _master-index.md   │              │
+│  │ Pure Python — no LLM. Copies file to  │              │
+│  │ output/{feature}/{category}/. Updates  │              │
+│  │ _index.md and _master-index.md. Ex-   │              │
+│  │ tracts tags from content.             │              │
 │  └────────────────────────────────────────┘              │
 │                                                          │
 └─────────────────────────────────────────────────────────┘
@@ -66,14 +67,14 @@ Any input
 
 ---
 
-## Why 3 Agents, Not 4
+## Why 2 LLM Agents, Not 4
 
-The original design had 4 agents: Transcriber, Doc Processor, Summarizer, Context Structurer. This was simplified, then a classifier was added:
+The original design had 4 LLM agents: Transcriber, Doc Processor, Summarizer, Context Structurer. The principle: **only use LLMs where reasoning is needed**.
 
-- **Transcriber + Doc Processor → Pre-processor script**: Format conversion is mechanical. Calling Whisper or pandoc doesn't need an LLM. A shell script is faster, cheaper, and more reliable.
-- **Classifier added (haiku)**: A quick, cheap pass that reads the first 500 lines and determines the content category. This controls how deep the summarizer goes — technical content gets near-verbatim extraction while business content gets heavy compression. Costs almost nothing (haiku, 1 turn).
-- **Summarizer now handles image interpretation**: Since it's already an opus agent reading content, adding image interpretation (via Claude's multimodal capabilities) is natural.
-- **Single pipeline for all inputs**: No branching logic in the orchestrator. The classifier + category-specific prompts handle depth differences.
+- **Transcriber + Doc Processor → Pre-processor script**: Format conversion is mechanical. Calling Whisper or pandoc doesn't need an LLM.
+- **Context Structurer → Python function**: File copying and index updates are string manipulation. No LLM reasoning needed. The structurer now runs in ~0s instead of ~2-7 min.
+- **Classifier added (haiku)**: A quick, cheap pass that determines content category and output category. Controls summarizer depth. Costs almost nothing (haiku, 1 turn, content injected into prompt).
+- **Content injection**: Both classifier and summarizer receive content directly in their prompts instead of wasting turns on Read tool calls.
 
 ### Content Categories
 
@@ -109,7 +110,7 @@ claude -p "$TASK" \
 |------|---------|
 | `-p "$TASK"` | Headless mode — executes the task and exits |
 | `--append-system-prompt-file` | Adds agent role to Claude Code's base system prompt |
-| `--model` | Model per agent (opus for summarizer, sonnet for structurer) |
+| `--model` | Model per agent (haiku for classifier, opus for summarizer) |
 | `--max-turns` | Limits the agentic loop |
 | `--dangerously-skip-permissions` | Full autonomy without confirmation prompts |
 | `--disallowedTools` | Restricts tools by agent role |
@@ -119,26 +120,25 @@ claude -p "$TASK" \
 
 ## Agents
 
-### Classifier (haiku)
-- **Input**: Normalized markdown from `processing/normalized/` (first 500 lines)
-- **Does**: Quick content analysis to determine content category (`technical`, `product`, `business`, `planning`)
-- **Output**: JSON with `content_category`, `confidence`, `reasoning`
-- **Tools**: Read only (no Write, Edit, Bash)
+### Classifier (haiku) — LLM agent
+- **Input**: First 500 lines of normalized markdown (injected into prompt, no Read needed)
+- **Does**: Quick content analysis to determine content category (`technical`, `product`, `business`, `planning`) and output category (`documents`, `meetings`, `voice-notes`, `research`). Supports dual categories (primary + secondary).
+- **Output**: JSON with `content_category`, `secondary_category`, `output_category`, `confidence`, `reasoning`
+- **Tools**: None needed (content injected into prompt)
 - **Max turns**: 1
 
-### Summarizer (opus)
-- **Input**: Normalized markdown from `processing/normalized/` + images from `-images/` directory + `content_category` from classifier
-- **Does**: Reads text, reads images (multimodal), extracts structured information using category-specific depth profile. Technical content gets deep extraction (APIs, schemas, patterns); business content gets high compression.
+### Summarizer (opus) — LLM agent
+- **Input**: Full normalized markdown (injected into prompt) + images from `-images/` directory (read via Read tool) + classification from classifier
+- **Does**: Extracts structured information using category-specific depth profile. Technical content gets deep extraction (APIs, schemas, patterns); business content gets high compression. Dual categories apply secondary depth to matching sections.
 - **Output**: Structured markdown in `processing/summarized/`
-- **Tools**: Read, Write, Glob, Grep (no Bash)
+- **Tools**: Read (images only), Write, Glob, Grep (no Bash)
 - **Max turns**: 25
 
-### Context Structurer (sonnet)
-- **Input**: Summarized markdown from `processing/summarized/`
-- **Does**: Categorizes by feature profile, writes to output, updates indexes
-- **Output**: Final markdown in `output/{feature}/{category}/` with updated `_index.md` and `_master-index.md`
-- **Tools**: Read, Write, Glob, Grep (no Bash)
-- **Max turns**: 15
+### Structurer — Pure Python (no LLM)
+- **Input**: Summarized markdown from `processing/summarized/` + `output_category` from classifier
+- **Does**: Copies file to `output/{feature}/{category}/` with slugified filename, extracts tags from content, updates `_index.md` and `_master-index.md` with timestamp
+- **Output**: Final markdown in `output/{feature}/{category}/` with updated indexes
+- **Implementation**: `structure_output()` in `orchestrator.py`
 
 ---
 
@@ -149,8 +149,6 @@ claude -p "$TASK" \
 | `preprocess.sh` | orchestrator.py | python3 (for base64 extraction) | Unified pre-processor — routes all input types |
 | `transcribe.sh` | preprocess.sh | curl, Whisper server | Sends audio/video to local Whisper server |
 | `extract-doc.sh` | preprocess.sh | pandoc 3.x | Converts DOCX/PDF/PPTX to markdown via pandoc |
-| `watch-input.sh` | — | — | Placeholder: watches `input/` for new files |
-| `sync-to-consumer.sh` | — | — | Placeholder: syncs `output/` to downstream apps |
 
 ---
 
@@ -197,7 +195,7 @@ processing/normalized/2026-03-23-project-spec-images/
     ▼ (summarizer — reads text + images, uses "technical" depth profile)
 processing/summarized/2026-03-23-project-spec.md
     │
-    ▼ (context-structurer — categorizes and indexes)
+    ▼ (structurer — Python, copies and indexes)
 output/{feature}/documents/2026-03-23-project-spec.md
 output/{feature}/documents/_index.md  (updated)
 output/{feature}/_master-index.md     (updated)
@@ -246,6 +244,5 @@ WHISPER_LANG=en
 
 ## Next Steps
 
-1. Test end-to-end pipeline run with classifier step
-2. Tune summarizer extraction profiles based on real output quality per category
-3. Implement `watch-input.sh` and `sync-to-consumer.sh`
+1. Tune summarizer extraction profiles based on real output quality per category
+2. Test classifier with diverse content types (business calls, planning sessions)

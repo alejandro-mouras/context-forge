@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Orchestrator-driven pipeline that transforms audio, video, documents, and text into structured markdown context. Uses a unified 4-step pipeline: pre-process (script) → classify (agent) → summarize (agent) → structure (agent).
+Orchestrator-driven pipeline that transforms audio, video, documents, and text into structured markdown context. Uses a unified 4-step pipeline: pre-process (script) → classify (agent) → summarize (agent) → structure (script).
 
 Not tied to any specific project. Each project defines a feature profile in `features/`.
 
@@ -13,15 +13,15 @@ See `orchestrator-architecture.md` for full details.
 ### Unified Pipeline
 
 ```
-Any input → Pre-processor (script) → Classifier (haiku agent) → Summarizer (opus agent) → Context Structurer (sonnet agent)
+Any input → Pre-processor (script) → Classifier (haiku agent) → Summarizer (opus agent) → Structurer (script)
 ```
 
-- **Pre-processor**: A shell script (no LLM). Normalizes any input format into clean markdown + extracted images. Routes by file extension: audio/video → Whisper, docx/pptx → pandoc + zip image extraction, markdown → base64 image extraction, pdf/odt → pandoc, txt → copy.
-- **Classifier**: Haiku agent (1 turn, fast). Reads the first 500 lines of normalized content and determines the content category: `technical`, `product`, `business`, or `planning`. This category controls the summarizer's extraction depth.
-- **Summarizer**: Opus agent. Reads normalized markdown + interprets images as structured text. Extraction depth varies by content category — technical content gets near-verbatim preservation of APIs, schemas, and architecture; business content gets high compression focused on numbers and decisions.
-- **Context Structurer**: Sonnet agent. Categorizes output, writes to `output/{feature}/{category}/`, updates indexes.
+- **Pre-processor**: Shell script (no LLM). Normalizes any input format into clean markdown + extracted images. Routes by file extension: audio/video → Whisper, docx/pptx → pandoc + zip image extraction, markdown → base64 image extraction, pdf/odt → pandoc, txt → copy.
+- **Classifier**: Haiku agent (1 turn, fast). Reads the first 500 lines, determines content category (`technical`, `product`, `business`, `planning`) and output category (`documents`, `meetings`, `voice-notes`, `research`).
+- **Summarizer**: Opus agent. Content injected directly into prompt (no Read turns wasted). Interprets images via multimodal Read. Extraction depth varies by content category.
+- **Structurer**: Pure Python in orchestrator (no LLM). Copies summarized file to `output/{feature}/{category}/`, updates `_index.md` and `_master-index.md`.
 
-All agents are invoked via `claude -p` CLI (subscription, not API).
+Only the classifier and summarizer use LLM. The rest is scripts and Python.
 
 ### Content Categories (Classifier → Summarizer)
 
@@ -39,17 +39,14 @@ context-forge/
 ├── orchestrator.py          # Pipeline logic — pre-process → classify → summarize → structure
 ├── config.yaml              # Global config (active feature, supported extensions) — not committed
 ├── config.yaml.example      # Template for config.yaml
-├── agents/                  # Agent definitions (3 agents)
+├── agents/                  # Agent definitions (2 LLM agents)
 │   ├── classifier/          # Quick content categorization (haiku)
-│   ├── summarizer/          # Text extraction + image interpretation (opus)
-│   └── context-structurer/  # Categorize, index, cross-reference (sonnet)
+│   └── summarizer/          # Text extraction + image interpretation (opus)
 ├── features/                # Feature profiles — not committed (see features/README.md)
 ├── scripts/                 # Utility scripts
 │   ├── preprocess.sh        # Unified pre-processor (routes all input types)
 │   ├── transcribe.sh        # Whisper API client (called by preprocess.sh)
-│   ├── extract-doc.sh       # Pandoc extraction (called by preprocess.sh)
-│   ├── watch-input.sh       # File watcher (placeholder)
-│   └── sync-to-consumer.sh  # Output sync (placeholder)
+│   └── extract-doc.sh       # Pandoc extraction (called by preprocess.sh)
 ├── input/                   # Drop zone (audio/, video/, docs/, text/)
 ├── processing/              # Intermediates (normalized/, summarized/, processed.log)
 ├── output/                  # Final output by feature — not committed
@@ -112,9 +109,8 @@ The orchestrator tracks processed files in `processing/processed.log` (TSV: time
 - `scripts/preprocess.sh` — routes all input types, extracts base64 images from markdown, extracts images from docx/pptx zips
 - `scripts/transcribe.sh` — Whisper API client (called by preprocess.sh for audio/video)
 - `scripts/extract-doc.sh` — pandoc extraction (called by preprocess.sh for docs)
-- All agent configs and system prompts (classifier, summarizer, context-structurer)
-
-**Placeholders**: `watch-input.sh`, `sync-to-consumer.sh`.
+- Agent configs and system prompts (classifier, summarizer)
+- Context structurer as pure Python in orchestrator.py (file copy + index updates, no LLM)
 
 **Tested end-to-end**: Document pipeline (PRD markdown with images) and audio pipeline (65min meeting via Whisper) — both working.
 
@@ -126,7 +122,7 @@ The orchestrator tracks processed files in `processing/processed.log` (TSV: time
 | PyYAML | orchestrator.py | Auto-installed by init.sh |
 | pandoc 3.x | preprocess.sh (docs) | `brew install pandoc` |
 | curl | preprocess.sh (audio/video) | Pre-installed on macOS |
-| Claude Code CLI | all agents | Subscription required |
+| Claude Code CLI | classifier, summarizer | Subscription required |
 | Whisper server | preprocess.sh (audio/video) | Running on network PC |
 
 ## Key Behaviors
@@ -144,7 +140,7 @@ The orchestrator tracks processed files in `processing/processed.log` (TSV: time
 ## Key Design Decisions
 
 - **Unified pipeline over branching**: One flow for all inputs.
-- **3 agents**: Classifier (haiku, cheap), Summarizer (opus, deep), Context Structurer (sonnet, indexing).
+- **2 LLM agents + scripts**: Classifier (haiku, cheap), Summarizer (opus, deep). Context structurer is pure Python — LLMs only where reasoning is needed.
 - **CLI over SDK**: Uses Claude Code subscription, not API. No per-token billing.
 - **Feature profiles**: Each project has a yaml in `features/`. Not committed — project-specific.
 - **Output namespaced by feature**: `output/{feature}/meetings/`, not flat.
@@ -153,8 +149,7 @@ The orchestrator tracks processed files in `processing/processed.log` (TSV: time
 ## What Needs To Be Done
 
 1. Tune agent system prompts based on real output quality
-2. Implement remaining scripts (`watch-input.sh`, `sync-to-consumer.sh`)
-3. Test classifier agent with different content types
+2. Test classifier agent with different content types
 
 ## Architecture Reference
 

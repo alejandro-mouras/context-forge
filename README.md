@@ -1,6 +1,6 @@
 # Context Forge
 
-Orchestrator-driven pipeline that transforms audio, video, documents, and text into structured markdown context. Uses a unified 4-step pipeline with Claude Code CLI agents.
+Orchestrator-driven pipeline that transforms audio, video, documents, and text into structured markdown context. Uses a unified 4-step pipeline — 2 LLM agents + 2 scripts.
 
 ## How It Works
 
@@ -8,14 +8,16 @@ Orchestrator-driven pipeline that transforms audio, video, documents, and text i
 Any input (audio/video/docs/text/markdown)
     → Pre-processor (script — no LLM)
         Normalizes to clean markdown + extracted images
-    → Classifier Agent (haiku)
+    → Classifier Agent (haiku — 1 turn)
         Quick categorization: technical, product, business, or planning
     → Summarizer Agent (opus)
         Structured extraction + image interpretation, depth guided by category
-    → Context Structurer Agent (sonnet)
-        Categorizes, indexes, cross-references
+    → Structurer (Python — no LLM)
+        Copies to output/{feature}/{category}/, updates indexes
     → Output: structured markdown in output/{feature}/
 ```
+
+Only the classifier and summarizer use LLM. The rest is scripts and Python.
 
 All inputs follow the same pipeline. The pre-processor routes by file type:
 
@@ -35,8 +37,8 @@ Context Forge is **not tied to any specific project**. Each project defines a pr
 
 | Directory | Purpose |
 |-----------|---------|
-| `agents/` | Agent definitions (classifier + summarizer + context-structurer) |
-| `features/` | Feature profiles (one yaml per project) |
+| `agents/` | Agent definitions (classifier + summarizer) |
+| `features/` | Feature profiles (one yaml per project, not committed) |
 | `scripts/` | Pre-processor and utility scripts |
 | `input/` | Drop zone for raw files (audio, video, docs, text) |
 | `processing/` | Intermediates (normalized, summarized, tracker log) |
@@ -48,7 +50,8 @@ Context Forge is **not tied to any specific project**. Each project defines a pr
 |-------|-------|---------|
 | **Classifier** | haiku | Quick content categorization (1 turn) — determines extraction depth |
 | **Summarizer** | opus | Text extraction + image interpretation → structured markdown |
-| **Context Structurer** | sonnet | Categorize, index, and cross-reference output |
+
+The structurer step is pure Python in `orchestrator.py` — no LLM needed for file copy and index updates.
 
 ## Prerequisites
 
@@ -58,7 +61,7 @@ Context Forge is **not tied to any specific project**. Each project defines a pr
 | **PyYAML** | orchestrator.py | Auto-installed by `init.sh` |
 | **pandoc 3.x** | preprocess.sh (docs) | `brew install pandoc` |
 | **curl** | preprocess.sh (audio/video) | Pre-installed on macOS |
-| **Claude Code CLI** | all agents | [Install guide](https://docs.anthropic.com/en/docs/claude-code) |
+| **Claude Code CLI** | classifier, summarizer | [Install guide](https://docs.anthropic.com/en/docs/claude-code) |
 | **Whisper server** | preprocess.sh (audio/video) | Running on network PC ([details](.env.example)) |
 
 ## Setup

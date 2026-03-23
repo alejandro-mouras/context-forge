@@ -20,11 +20,11 @@ supported_extensions:
   text: [md, txt, html]
 
 # Pipeline: always the same sequence for all inputs
-# Pre-process (script) → Classifier (agent) → Summarizer (agent) → Context Structurer (agent)
+# Pre-process (script) → Classifier (agent) → Summarizer (agent) → Structurer (Python, no LLM)
 pipeline:
   - classifier
   - summarizer
-  - context-structurer
+  # structurer is pure Python in orchestrator.py (no LLM needed)
 
 # Default agent settings (can be overridden per agent in agents/{name}/config.yaml)
 agent_defaults:
