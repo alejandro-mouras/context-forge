@@ -1,0 +1,10 @@
+name: summarizer
+description: "Extracts structured information from pre-processed content — text + image interpretation"
+model: opus
+max_turns: 25
+permission_mode: dangerously-skip
+disallowed_tools:
+  - "Bash"
+dependencies: []
+scripts: []
+env_required: []

@@ -1,0 +1,12 @@
+name: classifier
+description: "Quick content classification — determines summarization depth and extraction strategy"
+model: haiku
+max_turns: 1
+permission_mode: dangerously-skip
+disallowed_tools:
+  - "Bash"
+  - "Edit"
+  - "Write"
+dependencies: []
+scripts: []
+env_required: []

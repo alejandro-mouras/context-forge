@@ -1,0 +1,10 @@
+name: context-structurer
+description: "Indexes, cross-references, and categorizes processed content into final output"
+model: sonnet
+max_turns: 15
+permission_mode: dangerously-skip
+disallowed_tools:
+  - "Bash"
+dependencies: []
+scripts: []
+env_required: []
