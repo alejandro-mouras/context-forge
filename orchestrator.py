@@ -144,7 +144,7 @@ def read_file_content(file_path, max_lines=None):
         return f.read()
 
 
-def build_task_prompt(agent_name, input_file, feature, content_category=None):
+def build_task_prompt(agent_name, input_file, feature, classification=None):
     """Build the task prompt for an agent."""
     feature_context = yaml.dump(feature, default_flow_style=False)
     basename = Path(input_file).stem
@@ -178,12 +178,24 @@ def build_task_prompt(agent_name, input_file, feature, content_category=None):
             )
 
         category_note = ""
-        if content_category:
-            category_note = (
-                f"\n\nCONTENT CATEGORY: {content_category}\n"
-                f"Use the '{content_category}' extraction profile from your system prompt. "
-                f"Follow that profile's structure and depth guidelines exactly."
-            )
+        if classification:
+            primary = classification["primary"]
+            secondary = classification.get("secondary")
+            if secondary:
+                category_note = (
+                    f"\n\nCONTENT CATEGORIES: primary={primary}, secondary={secondary}\n"
+                    f"Use the '{primary}' extraction profile as your base structure. "
+                    f"But for sections that contain {secondary} content, apply the '{secondary}' "
+                    f"extraction depth — preserve full detail for those sections as described "
+                    f"in the '{secondary}' profile. Do not compress {secondary} sections just "
+                    f"because the primary category has higher compression."
+                )
+            else:
+                category_note = (
+                    f"\n\nCONTENT CATEGORY: {primary}\n"
+                    f"Use the '{primary}' extraction profile from your system prompt. "
+                    f"Follow that profile's structure and depth guidelines exactly."
+                )
 
         return (
             f"Extract structured information from the content below and write the result "
@@ -216,7 +228,7 @@ AGENT_TIMEOUTS = {
 
 
 def run_agent(agent_name, task, config):
-    """Launch a Claude Code instance for an agent."""
+    """Launch a Claude Code instance for an agent with real-time progress output."""
     agent_config = load_agent_config(agent_name)
     defaults = config.get("agent_defaults", {})
 
@@ -246,40 +258,68 @@ def run_agent(agent_name, task, config):
     print(f"\n{'='*60}")
     print(f"  Agent: {agent_name} ({model})")
     print(f"  Max turns: {max_turns} | Timeout: {timeout}s")
-    print(f"{'='*60}\n")
+    print(f"{'='*60}\n", flush=True)
 
-    result = subprocess.run(
+    # Stream output in real-time instead of capturing
+    import time
+    start_time = time.time()
+    process = subprocess.Popen(
         cmd,
         cwd=str(ROOT),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout,
     )
 
-    if result.returncode != 0:
-        print(f"[ERROR] {agent_name} failed (exit {result.returncode})")
-        if result.stderr:
-            print(f"  stderr: {result.stderr[:500]}")
+    output_text = ""
+    turn_count = 0
+
+    try:
+        for line in process.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+                event_type = event.get("type", "")
+
+                # Show tool usage in real-time
+                if event_type == "assistant":
+                    for block in event.get("message", {}).get("content", []):
+                        if block.get("type") == "tool_use":
+                            tool_name = block.get("name", "?")
+                            elapsed = int(time.time() - start_time)
+                            print(f"  [{elapsed}s] Using: {tool_name}", flush=True)
+                            turn_count += 1
+                        elif block.get("type") == "text":
+                            output_text = block["text"]
+
+                elif event_type == "result":
+                    text = event.get("result", "")
+                    if text:
+                        output_text = text
+
+            except (json.JSONDecodeError, KeyError):
+                continue
+
+        process.wait(timeout=timeout)
+
+    except subprocess.TimeoutExpired:
+        process.kill()
+        print(f"[ERROR] {agent_name} timed out after {timeout}s")
         return None
 
-    # Parse stream-json output — extract last assistant text
-    # Check both "assistant" message blocks and "result" type events
-    output_text = ""
-    for line in result.stdout.strip().split("\n"):
-        try:
-            event = json.loads(line)
-            if event.get("type") == "assistant":
-                for block in event.get("message", {}).get("content", []):
-                    if block.get("type") == "text":
-                        output_text = block["text"]
-            elif event.get("type") == "result":
-                text = event.get("result", "")
-                if text:
-                    output_text = text
-        except (json.JSONDecodeError, KeyError):
-            continue
+    elapsed = int(time.time() - start_time)
 
-    print(f"[{agent_name}] {output_text[:200]}" if output_text else f"[{agent_name}] (no text output)")
+    if process.returncode != 0:
+        stderr = process.stderr.read() if process.stderr else ""
+        print(f"[ERROR] {agent_name} failed (exit {process.returncode}) after {elapsed}s")
+        if stderr:
+            print(f"  stderr: {stderr[:500]}")
+        return None
+
+    print(f"\n  [{elapsed}s] Done ({turn_count} tool calls)")
+    print(f"[{agent_name}] {output_text[:200]}" if output_text else f"[{agent_name}] (no text output)", flush=True)
     return output_text
 
 
@@ -290,41 +330,54 @@ DEFAULT_CATEGORY = "technical"
 
 
 def classify(normalized_file, config, feature):
-    """Run the classifier agent to determine content category."""
+    """Run the classifier agent to determine content category.
+
+    Returns a dict with 'primary' and optional 'secondary' category.
+    """
     task = build_task_prompt("classifier", normalized_file, feature)
     result = run_agent("classifier", task, config)
 
+    default_result = {"primary": DEFAULT_CATEGORY, "secondary": None}
+
     if result is None:
         print(f"[classifier] Failed — defaulting to '{DEFAULT_CATEGORY}'")
-        return DEFAULT_CATEGORY
+        return default_result
 
     # Extract JSON from agent output (may contain markdown fences)
     text = result.strip()
     if "```" in text:
-        for line in text.split("\n"):
-            line = line.strip()
-            if line.startswith("{"):
-                text = line
-                break
+        import re
+        fence_match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
+        if fence_match:
+            text = fence_match.group(1).strip()
 
     try:
         data = json.loads(text)
-        category = data.get("content_category", DEFAULT_CATEGORY)
+        primary = data.get("content_category", DEFAULT_CATEGORY)
+        secondary = data.get("secondary_category")
         confidence = data.get("confidence", "unknown")
         reasoning = data.get("reasoning", "")
 
-        if category not in VALID_CATEGORIES:
-            print(f"[classifier] Unknown category '{category}' — defaulting to '{DEFAULT_CATEGORY}'")
-            category = DEFAULT_CATEGORY
+        if primary not in VALID_CATEGORIES:
+            print(f"[classifier] Unknown primary '{primary}' — defaulting to '{DEFAULT_CATEGORY}'")
+            primary = DEFAULT_CATEGORY
 
-        print(f"[classifier] Category: {category} (confidence: {confidence})")
+        if secondary and secondary not in VALID_CATEGORIES:
+            print(f"[classifier] Unknown secondary '{secondary}' — ignoring")
+            secondary = None
+
+        if secondary:
+            print(f"[classifier] Category: {primary} + {secondary} (confidence: {confidence})")
+        else:
+            print(f"[classifier] Category: {primary} (confidence: {confidence})")
         if reasoning:
             print(f"  Reasoning: {reasoning[:200]}")
-        return category
+
+        return {"primary": primary, "secondary": secondary}
 
     except (json.JSONDecodeError, AttributeError):
         print(f"[classifier] Could not parse output — defaulting to '{DEFAULT_CATEGORY}'")
-        return DEFAULT_CATEGORY
+        return default_result
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────
@@ -348,47 +401,76 @@ def find_output_file(directory, basename):
 
 # ─── Pipeline ────────────────────────────────────────────────────────
 
-def run_pipeline(input_file, config, feature, force=False):
-    """Run the unified pipeline: Pre-process → Summarize → Structure."""
+PIPELINE_STEPS = ["preprocess", "classify", "summarize", "structure"]
+
+
+def run_pipeline(input_file, config, feature, force=False, from_step=None):
+    """Run the unified pipeline: Pre-process → Classify → Summarize → Structure.
+
+    Args:
+        from_step: Start from this step instead of the beginning.
+            "classify" — skip pre-process, input must be a file in processing/normalized/
+            "summarize" — skip pre-process + classify, input must be in processing/normalized/
+            "structure" — skip everything except structurer, input must be in processing/summarized/
+    """
     input_path = Path(input_file)
     if not input_path.exists():
         print(f"Error: File not found: {input_file}")
         return False
 
     resolved_path = str(input_path.resolve())
+    start = PIPELINE_STEPS.index(from_step) if from_step else 0
+    steps_label = " → ".join(s.capitalize() for s in PIPELINE_STEPS[start:])
 
-    if not force and is_already_processed(resolved_path):
+    if start == 0 and not force and is_already_processed(resolved_path):
         print(f"Skipping (already processed): {input_file}")
         return True
 
     basename = input_path.stem
-    print(f"\nPipeline: Pre-process → Classify → Summarize → Structure")
+    # Strip date prefix (YYYY-MM-DD-) from basename if present for output file matching
+    import re
+    clean_basename = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", basename)
+
+    print(f"\nPipeline: {steps_label}")
     print(f"Input: {input_file}")
     print(f"Feature: {feature['name']}")
 
     # Step 1: Pre-process (script — no LLM)
-    normalized_file = preprocess(input_file)
-    if not normalized_file:
-        print("\nPipeline failed at: pre-processor")
-        return False
+    if start <= 0:
+        normalized_file = preprocess(input_file)
+        if not normalized_file:
+            print("\nPipeline failed at: pre-processor")
+            return False
+    else:
+        normalized_file = str(input_path) if start <= 2 else None
 
     # Step 2: Classifier agent (haiku — quick content categorization)
-    content_category = classify(normalized_file, config, feature)
-    print(f"  → Category: {content_category}")
+    if start <= 1:
+        classification = classify(normalized_file, config, feature)
+        label = classification["primary"]
+        if classification.get("secondary"):
+            label += f" + {classification['secondary']}"
+        print(f"  → Category: {label}")
+    else:
+        classification = {"primary": DEFAULT_CATEGORY, "secondary": None}
+        print(f"  → Category: {DEFAULT_CATEGORY} (default, classifier skipped)")
 
     # Step 3: Summarizer agent (opus — depth guided by category)
-    SUMMARIZED_DIR.mkdir(parents=True, exist_ok=True)
-    task = build_task_prompt("summarizer", normalized_file, feature, content_category=content_category)
-    result = run_agent("summarizer", task, config)
-    if result is None:
-        print("\nPipeline failed at: summarizer")
-        return False
+    if start <= 2:
+        SUMMARIZED_DIR.mkdir(parents=True, exist_ok=True)
+        task = build_task_prompt("summarizer", normalized_file, feature, classification=classification)
+        result = run_agent("summarizer", task, config)
+        if result is None:
+            print("\nPipeline failed at: summarizer")
+            return False
 
-    summarized_file = find_output_file(SUMMARIZED_DIR, basename)
-    if not summarized_file:
-        print("\nPipeline failed: summarizer produced no output file")
-        return False
-    print(f"  → Summarized: {summarized_file}")
+        summarized_file = find_output_file(SUMMARIZED_DIR, clean_basename)
+        if not summarized_file:
+            print("\nPipeline failed: summarizer produced no output file")
+            return False
+        print(f"  → Summarized: {summarized_file}")
+    else:
+        summarized_file = str(input_path)
 
     # Step 4: Context Structurer agent (sonnet — categorize and index)
     task = build_task_prompt("context-structurer", summarized_file, feature)
@@ -397,7 +479,8 @@ def run_pipeline(input_file, config, feature, force=False):
         print("\nPipeline failed at: context-structurer")
         return False
 
-    mark_processed(resolved_path)
+    if start == 0:
+        mark_processed(resolved_path)
     print(f"\nPipeline complete for: {input_file}")
     return True
 
@@ -407,8 +490,11 @@ def run_pipeline(input_file, config, feature, force=False):
 def main():
     if len(sys.argv) < 2:
         print("Usage: python orchestrator.py <input-file> [input-file2 ...]")
-        print("       python orchestrator.py --scan    (process new files in input/)")
-        print("       python orchestrator.py --force   (reprocess even if already done)")
+        print("       python orchestrator.py --scan          (process new files in input/)")
+        print("       python orchestrator.py --force         (reprocess even if already done)")
+        print("       python orchestrator.py --from-step <step> <file>")
+        print("         Steps: classify, summarize, structure")
+        print("         Example: python orchestrator.py --from-step classify processing/normalized/file.md")
         sys.exit(1)
 
     load_env()
@@ -419,7 +505,23 @@ def main():
     force = "--force" in args
     args = [a for a in args if a != "--force"]
 
+    # Parse --from-step
+    from_step = None
+    if "--from-step" in args:
+        idx = args.index("--from-step")
+        if idx + 1 >= len(args):
+            print("Error: --from-step requires a step name (classify, summarize, structure)")
+            sys.exit(1)
+        from_step = args[idx + 1]
+        if from_step not in PIPELINE_STEPS[1:]:  # can't start from "preprocess" — that's the default
+            print(f"Error: Invalid step '{from_step}'. Valid: classify, summarize, structure")
+            sys.exit(1)
+        args = args[:idx] + args[idx + 2:]
+
     if not args or args[0] == "--scan":
+        if from_step:
+            print("Error: --from-step cannot be used with --scan")
+            sys.exit(1)
         input_dir = ROOT / "input"
         files = []
         for subdir in ["audio", "video", "docs", "text"]:
@@ -436,7 +538,7 @@ def main():
             run_pipeline(str(f), config, feature, force=force)
     else:
         for input_file in args:
-            run_pipeline(input_file, config, feature, force=force)
+            run_pipeline(input_file, config, feature, force=force, from_step=from_step)
 
 
 if __name__ == "__main__":
