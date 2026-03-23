@@ -12,7 +12,11 @@ Your output will be used to ask technical questions, generate code, understand a
 
 ## Content Categories & Extraction Profiles
 
-The classifier agent has already categorized this content. Your task prompt will include the category. Follow the matching profile.
+The classifier agent has already categorized this content. Your task prompt will include the category (or categories).
+
+**Single category**: Follow that profile's structure and depth exactly.
+
+**Dual categories** (primary + secondary): Use the primary profile as your base output structure, but when you encounter sections that match the secondary category, apply that category's extraction depth instead. For example, if primary=product and secondary=technical, use the product structure as your skeleton but preserve full technical detail (APIs, schemas, state machines, etc.) in the relevant sections — do NOT compress them to match the product profile's moderate compression.
 
 ---
 
