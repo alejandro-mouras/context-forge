@@ -1,0 +1,34 @@
+# Context Forge — Global Configuration
+
+# Active feature profile (loaded from features/{feature}.yaml)
+active_feature: my-feature  # Must match a file in features/{name}.yaml
+
+# Paths
+paths:
+  input: input/
+  processing: processing/
+  output: output/
+  scripts: scripts/
+  agents: agents/
+  features: features/
+
+# Supported input extensions (pre-processor routes by type)
+supported_extensions:
+  audio: [mp3, wav, m4a, ogg, flac, wma, aac, opus]
+  video: [mp4, mov, webm, mkv, avi]
+  docs: [docx, pdf, pptx, odt, rtf, epub]
+  text: [md, txt, html]
+
+# Pipeline: always the same sequence for all inputs
+# Pre-process (script) → Classifier (agent) → Summarizer (agent) → Context Structurer (agent)
+pipeline:
+  - classifier
+  - summarizer
+  - context-structurer
+
+# Default agent settings (can be overridden per agent in agents/{name}/config.yaml)
+agent_defaults:
+  max_turns: 15
+  permission_mode: dangerously-skip
+  output_format: stream-json
+  verbose: true
