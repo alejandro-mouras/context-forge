@@ -9,6 +9,7 @@
 #   DOCX/PPTX  → extract text via pandoc + images from zip → markdown + images/
 #   Markdown    → extract base64 images to files, clean references → markdown + images/
 #   PDF/ODT/RTF → extract text via pandoc → markdown
+#   Images      → wrap in markdown with image reference → markdown + images/
 #   Plain text  → copy as-is → markdown
 #
 # Input filenames MUST start with YYYYMMDD_ prefix (e.g., 20260321_Silver PRD.md)
@@ -151,6 +152,18 @@ with open(output_file, 'w') as f:
 
 print(f"Extracted {image_count} base64 image(s)")
 PYEOF
+        ;;
+
+    # Images → wrap in markdown with image reference (for diagrams, flowcharts, etc.)
+    png|jpg|jpeg|svg)
+        echo "Type: image → wrap as markdown"
+        mkdir -p "$IMAGES_DIR"
+        cp "$INPUT_FILE" "$IMAGES_DIR/${FILENAME}"
+        cat > "$OUTPUT_FILE" << EOF
+# Diagram: ${NAME_PART}
+
+![${NAME_PART}](${IMAGES_DIR}/${FILENAME})
+EOF
         ;;
 
     # Plain text → copy as markdown

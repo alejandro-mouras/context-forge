@@ -18,6 +18,7 @@ supported_extensions:
   video: [mp4, mov, webm, mkv, avi]
   docs: [docx, pdf, pptx, odt, rtf, epub]
   text: [md, txt, html]
+  images: [png, jpg, jpeg, svg]
 
 # Pipeline: always the same sequence for all inputs
 # Pre-process (script) → Classifier (agent) → Summarizer (agent) → Structurer (Python, no LLM)

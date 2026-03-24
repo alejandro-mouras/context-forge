@@ -698,7 +698,7 @@ def main():
             sys.exit(1)
         input_dir = ROOT / "input"
         files = []
-        for subdir in ["audio", "video", "docs", "text"]:
+        for subdir in ["audio", "video", "docs", "text", "images"]:
             dir_path = input_dir / subdir
             if dir_path.exists():
                 files.extend([f for f in dir_path.iterdir() if f.is_file() and not f.name.startswith(".")])

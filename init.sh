@@ -117,6 +117,7 @@ dirs=(
     "input/video"
     "input/docs"
     "input/text"
+    "input/images"
     "processing/normalized"
     "processing/summarized"
     "output"
