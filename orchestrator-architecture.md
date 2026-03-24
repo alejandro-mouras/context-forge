@@ -29,6 +29,7 @@ Any input
 │  │   docx/pptx   → pandoc + zip images   │              │
 │  │   markdown    → base64 image extraction│              │
 │  │   pdf/odt     → pandoc                 │              │
+│  │   images      → wrap as markdown ref   │              │
 │  │   txt         → copy                   │              │
 │  └────────────────────────────┬───────────┘              │
 │                               │                          │
@@ -221,7 +222,7 @@ output/{feature}/_master-index.md     (updated)
 
 Images are extracted by the pre-processor and interpreted by the summarizer:
 
-1. **Pre-processor extracts images**: From docx/pptx zips or from markdown base64 data
+1. **Pre-processor extracts images**: From docx/pptx zips, from markdown base64 data, or from direct image inputs (png/jpg/svg)
 2. **Summarizer reads images**: Using Claude's multimodal Read tool (PNG/JPG files)
 3. **Summarizer writes text descriptions**: Inline in the structured markdown output
 4. **Images stay in `processing/`**: They never reach `output/`

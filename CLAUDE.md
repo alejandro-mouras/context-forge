@@ -16,7 +16,7 @@ See `orchestrator-architecture.md` for full details.
 Any input → Pre-processor (script) → Classifier (haiku agent) → Summarizer (opus agent) → Structurer (script)
 ```
 
-- **Pre-processor**: Shell script (no LLM). Normalizes any input format into clean markdown + extracted images. Routes by file extension: audio/video → Whisper, docx/pptx → pandoc + zip image extraction, markdown → base64 image extraction, pdf/odt → pandoc, txt → copy.
+- **Pre-processor**: Shell script (no LLM). Normalizes any input format into clean markdown + extracted images. Routes by file extension: audio/video → Whisper, docx/pptx → pandoc + zip image extraction, markdown → base64 image extraction, pdf/odt → pandoc, images (png/jpg/svg) → wrap in markdown with image reference, txt → copy.
 - **Classifier**: Haiku agent (1 turn, fast). Reads the first 500 lines, determines content category (`technical`, `product`, `business`, `planning`) and output category (`documents`, `meetings`, `voice-notes`, `research`).
 - **Summarizer**: Opus agent. Content injected directly into prompt (no Read turns wasted). Interprets images via multimodal Read. Extraction depth varies by content category.
 - **Structurer**: Pure Python in orchestrator (no LLM). Copies summarized file to `output/{feature}/{category}/`, updates `_index.md` and `_master-index.md`.
@@ -47,7 +47,7 @@ context-forge/
 │   ├── preprocess.sh        # Unified pre-processor (routes all input types)
 │   ├── transcribe.sh        # Whisper API client (called by preprocess.sh)
 │   └── extract-doc.sh       # Pandoc extraction (called by preprocess.sh)
-├── input/                   # Drop zone (audio/, video/, docs/, text/)
+├── input/                   # Drop zone (audio/, video/, docs/, text/, images/)
 ├── processing/              # Intermediates (normalized/, summarized/, processed.log)
 ├── output/                  # Final output by feature — not committed
 ├── init.sh                  # Project initialization script
@@ -137,6 +137,7 @@ The orchestrator tracks processed files in `processing/processed.log` (TSV: time
 - **YYYYMMDD_ filename prefix required**: All input files must start with `YYYYMMDD_` (e.g., `20260321_my-document.md`). This date is carried through the entire pipeline — normalized, summarized, and output filenames all use it.
 - **Processing deduplication**: Files tracked by path + SHA-256 hash.
 - **Google Drive markdown preferred**: For Google Docs, export as .md and drop in `input/text/`. Cleaner than .docx.
+- **Diagrams as images**: For Lucidchart, Miro, or any visual diagram tool, export as PNG and drop in `input/images/`. The summarizer interprets diagrams visually via multimodal Claude and converts them to structured text.
 
 ## Key Design Decisions
 
